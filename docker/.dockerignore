@@ -1,0 +1,5 @@
+# keep build context tiny
+data/
+.env
+.git
+*.md

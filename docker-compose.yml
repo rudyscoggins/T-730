@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  radiobot:
+    build: 
+      context: .               # ?? send the whole repo
+      dockerfile: docker/Dockerfile
+    container_name: 730radiobot
+    env_file: .env          
+    volumes:
+      - ./data:/app/data
+    labels:
+      - com.centurylinklabs.watchtower.scope=730radiobot
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file: .env          
+    command: >
+      --interval 180
+      --scope songripper
+      -n shoutrrr
+      --notification-url=telegram://${WATCHTOWER_TELEGRAM_TOKEN}@telegram?channels=${WATCHTOWER_TELEGRAM_CHAT_ID}
+    restart: unless-stopped

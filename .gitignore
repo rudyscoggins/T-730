@@ -1,0 +1,3 @@
+# secrets / runtime state
+.env
+data/
