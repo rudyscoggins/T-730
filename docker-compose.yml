@@ -20,7 +20,7 @@ services:
     env_file: .env          
     command: >
       --interval 180
-      --scope songripper
+      --scope 730radiobot
       -n shoutrrr
       --notification-url=telegram://${WATCHTOWER_TELEGRAM_TOKEN}@telegram?channels=${WATCHTOWER_TELEGRAM_CHAT_ID}
     restart: unless-stopped
