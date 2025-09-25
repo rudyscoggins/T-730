@@ -1,3 +1,12 @@
 # secrets / runtime state
 .env
 data/
+
+# local dev env and misc
+.venv/
+.pip-empty.conf
+Here’s
+
+# Python cache
+__pycache__/
+*.pyc

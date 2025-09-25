@@ -36,13 +36,13 @@ async def on_message(msg: discord.Message):
     for vid in vids:
         try:
             if video_exists(vid, PLAYLIST):
-                await msg.add_reaction("??")  # already there
+                await msg.add_reaction("🔁")  # already there
                 continue
             add_to_playlist(vid, PLAYLIST)
-            await msg.add_reaction("?")
+            await msg.add_reaction("✅")
         except Exception as e:
-            await msg.add_reaction("?")
-            await msg.reply(f"Couldn't add `{vid}` ? {e}")
+            logging.exception("Couldn't add video %s to playlist %s", vid, PLAYLIST)
+            await msg.add_reaction("❌")
+            await msg.reply(f"Couldn't add `{vid}`: {e}")
 
 bot.run(TOKEN)
-
