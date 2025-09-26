@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   radiobot:
     build: 
@@ -9,6 +7,11 @@ services:
     env_file: .env          
     volumes:
       - ./data:/app/data
+    # Use host networking so the OAuth loopback flow on http://localhost:PORT
+    # works reliably from inside the container on first run.
+    network_mode: host
+    # Run as the host user so bind-mounted ./data is writable.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     labels:
       - com.centurylinklabs.watchtower.scope=730radiobot
     restart: unless-stopped
