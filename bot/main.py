@@ -45,4 +45,5 @@ async def on_message(msg: discord.Message):
             await msg.add_reaction("❌")
             await msg.reply(f"Couldn't add `{vid}`: {e}")
 
-bot.run(TOKEN)
+if __name__ == "__main__":
+    bot.run(TOKEN)

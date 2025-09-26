@@ -6,6 +6,7 @@ Discord bot that adds YouTube links (tagged with a keyword) to a playlist using 
 - Create venv and install deps:
   - `python -m venv .venv && source .venv/bin/activate`
   - `pip install -r bot/requirements.txt`
+  - (optional for tests) `pip install -r requirements-dev.txt`
 - Run the bot (requires `.env`):
   - `python -m bot.main`
 
@@ -26,6 +27,14 @@ Optional extras:
 ## Docker
 - Build and run: `docker compose up --build radiobot`
 - First run triggers OAuth helper inside the container to create `data/creds.json`.
+
+## Testing
+- Install dev deps: `pip install -r requirements-dev.txt`
+- Run tests: `pytest -q`
+
+Notes:
+- Tests mock Discord and YouTube clients; no network calls are made.
+- Importing `bot.main` will not start the client; it runs only under `python -m bot.main`.
 
 ## Configuration
 Copy `.env.example` to `.env` and fill in:
