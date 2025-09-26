@@ -2,7 +2,10 @@ import os, re, logging, asyncio
 import discord
 from dotenv import load_dotenv
 from .youtube import add_to_playlist, video_exists
+from .youtube.urls import canonical_video_ids_from_text
 
+# Legacy regex retained for compatibility if needed, but URL parsing below
+# now handles multiple variants and deduplication.
 YTRX = re.compile(r"(?:youtu\.be/|youtube\.com/watch\?v=)([A-Za-z0-9_-]{11})",
                   re.IGNORECASE)
 
@@ -29,7 +32,9 @@ async def on_message(msg: discord.Message):
     if KEYWORD not in msg.content.lower():
         return
 
-    vids = YTRX.findall(msg.content)
+    # Extract canonical video IDs from the message content, supporting
+    # multiple URL variants (watch, youtu.be, shorts, embed, etc.).
+    vids = canonical_video_ids_from_text(msg.content)
     if not vids:
         return
 
