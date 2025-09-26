@@ -1,7 +1,14 @@
-import os, re, logging, asyncio
+import os, re, logging, asyncio, time
 import discord
 from dotenv import load_dotenv
 from .youtube import add_to_playlist, video_exists
+from .youtube.urls import canonical_video_ids_from_text
+
+try:
+    # discord.py depends on aiohttp; use it for an in-process health endpoint
+    from aiohttp import web  # type: ignore
+except Exception:  # pragma: no cover - only if aiohttp missing at runtime
+    web = None  # type: ignore
 from .youtube.urls import canonical_video_ids_from_text
 
 # Legacy regex retained for compatibility if needed, but URL parsing below
@@ -21,9 +28,65 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = discord.Client(intents=intents)
 
+START_TIME = time.time()
+_health_started = False
+
+
+async def _start_health_server() -> None:
+    """Start a lightweight health HTTP server on HEALTH_PORT.
+
+    Exposes `/healthz` returning JSON with status, readiness, and uptime.
+    Uses aiohttp if available via discord.py dependency.
+    """
+
+    if web is None:
+        logging.warning("Health server unavailable: aiohttp not importable")
+        return
+
+    app = web.Application()
+
+    async def health(_request):
+        return web.json_response({
+            "status": "ok",
+            "ready": bot.is_ready(),
+            "uptime_s": int(time.time() - START_TIME),
+        })
+
+    app.add_routes([web.get("/healthz", health), web.get("/", health)])
+
+    host = os.getenv("HEALTH_HOST", "0.0.0.0")
+    port = int(os.getenv("HEALTH_PORT", "8081"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host=host, port=port)
+    await site.start()
+    logging.info("Health server started on http://%s:%s/healthz", host, port)
+
 @bot.event
 async def on_ready():
+    global _health_started
     logging.info(f"Logged in as {bot.user}")
+
+    # Start health endpoint once
+    if not _health_started:
+        try:
+            bot.loop.create_task(_start_health_server())
+            _health_started = True
+        except Exception:
+            logging.exception("Failed to start health server")
+
+    health_port = os.getenv("HEALTH_PORT", "8081")
+    logging.info("READY playlist=%s channel=%s health=http://localhost:%s/healthz",
+                 PLAYLIST, CHANNEL_ID, health_port)
+
+    # Optional: send a ready message to the configured channel
+    try:
+        ch = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
+        if ch:
+            await ch.send(f"730RadioBot is online. Listening for '" + KEYWORD + "'.")
+    except Exception:
+        # Non-fatal if we can't announce in channel
+        logging.debug("Ready announcement skipped or failed", exc_info=True)
 
 @bot.event
 async def on_message(msg: discord.Message):
@@ -50,5 +113,6 @@ async def on_message(msg: discord.Message):
             await msg.add_reaction("❌")
             await msg.reply(f"Couldn't add `{vid}`: {e}")
 
+if __name__ == "__main__":
 if __name__ == "__main__":
     bot.run(TOKEN)

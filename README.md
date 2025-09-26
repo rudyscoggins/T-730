@@ -36,6 +36,13 @@ Notes:
 - Tests mock Discord and YouTube clients; no network calls are made.
 - Importing `bot.main` will not start the client; it runs only under `python -m bot.main`.
 
+## Health Check
+- The bot starts a lightweight HTTP endpoint for liveness/readiness:
+  - URL: `http://localhost:${HEALTH_PORT:-8081}/healthz`
+  - Response: `{ "status": "ok", "ready": true|false, "uptime_s": <int> }`
+- On startup, logs a single `READY` line with playlist, channel, and health URL.
+- Configure host/port via env: `HEALTH_HOST`, `HEALTH_PORT`.
+
 ## Configuration
 Copy `.env.example` to `.env` and fill in:
 - `DISCORD_TOKEN`, `CHANNEL_ID`, `PLAYLIST_ID`
