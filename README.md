@@ -43,6 +43,14 @@ Notes:
 - On startup, logs a single `READY` line with playlist, channel, and health URL.
 - Configure host/port via env: `HEALTH_HOST`, `HEALTH_PORT`.
 
+## Token Rotation (Google OAuth)
+- If YouTube credentials expire or are revoked, the bot will reply with a clear
+  re-auth message in Discord and log an error.
+- Re-auth options:
+  - Local: `python -m bot.youtube.auth`
+  - Docker: `docker compose run --rm -e OAUTH_FORCE=1 radiobot`
+- This regenerates `data/creds.json`. You can also delete `data/creds.json` and run the container to trigger auth.
+
 ## Configuration
 Copy `.env.example` to `.env` and fill in:
 - `DISCORD_TOKEN`, `CHANNEL_ID`, `PLAYLIST_ID`

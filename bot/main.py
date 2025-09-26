@@ -2,6 +2,7 @@ import os, re, logging, asyncio, time
 import discord
 from dotenv import load_dotenv
 from .youtube import add_to_playlist, video_exists
+from .youtube import CredentialsExpiredError
 from .youtube.urls import canonical_video_ids_from_text
 
 try:
@@ -108,6 +109,10 @@ async def on_message(msg: discord.Message):
                 continue
             add_to_playlist(vid, PLAYLIST)
             await msg.add_reaction("✅")
+        except CredentialsExpiredError as e:
+            await msg.add_reaction("❌")
+            await msg.reply(str(e))
+            return
         except Exception as e:
             logging.exception("Couldn't add video %s to playlist %s", vid, PLAYLIST)
             await msg.add_reaction("❌")

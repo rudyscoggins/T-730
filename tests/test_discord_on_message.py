@@ -121,3 +121,24 @@ async def test_on_message_ignores_wrong_channel_or_no_keyword(monkeypatch):
 
     assert called == {"exists": 0, "add": 0}
 
+
+@pytest.mark.asyncio
+async def test_on_message_credentials_expired_prompts_reauth(monkeypatch):
+    from bot import main as m
+    from bot.youtube import CredentialsExpiredError
+
+    m.CHANNEL_ID = 77
+    m.KEYWORD = "730radio"
+    m.PLAYLIST = "pl77"
+
+    def raise_expired(video_id, playlist_id):
+        raise CredentialsExpiredError("Please re-auth")
+
+    monkeypatch.setattr(m, "video_exists", lambda v, p: False)
+    monkeypatch.setattr(m, "add_to_playlist", raise_expired)
+
+    msg = DummyMessage("730radio https://youtu.be/AAAAAAA1111", channel_id=77)
+    await m.on_message(msg)
+
+    assert "❌" in msg.reactions
+    assert any("re-auth" in r.lower() or "auth" in r.lower() for r in msg.replies)

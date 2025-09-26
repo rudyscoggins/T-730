@@ -13,11 +13,17 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.auth.exceptions import RefreshError
 
 # Scopes: read + manage YouTube (playlist insert requires write scope)
 SCOPES = [
     "https://www.googleapis.com/auth/youtube",
 ]
+
+
+class CredentialsExpiredError(RuntimeError):
+    """Raised when Google OAuth credentials are invalid/expired and require re-auth."""
+    pass
 
 
 def _data_path(filename: str) -> Path:
@@ -34,6 +40,15 @@ def _data_path(filename: str) -> Path:
 
     base = Path(os.getenv("DATA_DIR", "data"))
     return base / filename
+
+
+def _reauth_hint() -> str:
+    return (
+        "Google credentials invalid or expired. Re-auth by running one of:\n"
+        "- Locally: python -m bot.youtube.auth\n"
+        "- Docker: docker compose run --rm -e OAUTH_FORCE=1 radiobot\n"
+        "This opens a local URL to complete OAuth and regenerates data/creds.json."
+    )
 
 
 def _load_credentials() -> Credentials:
@@ -53,7 +68,10 @@ def _load_credentials() -> Credentials:
 
     # Refresh if expired and refresh_token is present
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            raise CredentialsExpiredError(_reauth_hint()) from e
         # Persist the refreshed token
         creds_path.write_text(creds.to_json())
 
@@ -94,6 +112,9 @@ def video_exists(video_id: str, playlist_id: str) -> bool:
                 .execute()
             )
         except HttpError as e:
+            status = getattr(getattr(e, "resp", None), "status", None)
+            if status in (401, 403):
+                raise CredentialsExpiredError(_reauth_hint()) from e
             raise RuntimeError(f"YouTube API error checking playlist: {e}") from e
 
         if any(
@@ -130,10 +151,14 @@ def add_to_playlist(video_id: str, playlist_id: str) -> dict:
             .execute()
         )
     except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        if status in (401, 403):
+            raise CredentialsExpiredError(_reauth_hint()) from e
         raise RuntimeError(f"YouTube API error adding video: {e}") from e
 
 
 __all__ = [
     "video_exists",
     "add_to_playlist",
+    "CredentialsExpiredError",
 ]
