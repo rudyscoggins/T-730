@@ -119,5 +119,4 @@ async def on_message(msg: discord.Message):
             await msg.reply(f"Couldn't add `{vid}`: {e}")
 
 if __name__ == "__main__":
-if __name__ == "__main__":
     bot.run(TOKEN)
