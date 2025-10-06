@@ -45,6 +45,8 @@ async def test_on_message_adds_two_videos(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         added.append((video_id, playlist_id))
 
+    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 120)
+
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
@@ -76,17 +78,18 @@ async def test_on_message_duplicate_and_success(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         added.append(video_id)
 
+    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 60)
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
     msg = DummyMessage(
-        "some text 730radio https://youtu.be/DUPLICATE12 https://www.youtube.com/watch?v=NEWVIDEO34",
+        "some text 730radio https://youtu.be/DUPLICATE12 https://www.youtube.com/watch?v=NEWVIDEO3X4",
         channel_id=200,
     )
 
     await m.on_message(msg)
 
-    assert added == ["NEWVIDEO34"]
+    assert added == ["NEWVIDEO3X4"]
     assert "🔁" in msg.reactions
     assert "✅" in msg.reactions
 
@@ -108,6 +111,7 @@ async def test_on_message_ignores_wrong_channel_or_no_keyword(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         called["add"] += 1
 
+    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 30)
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
@@ -134,6 +138,7 @@ async def test_on_message_credentials_expired_prompts_reauth(monkeypatch):
     def raise_expired(video_id, playlist_id):
         raise CredentialsExpiredError("Please re-auth")
 
+    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 120)
     monkeypatch.setattr(m, "video_exists", lambda v, p: False)
     monkeypatch.setattr(m, "add_to_playlist", raise_expired)
 
@@ -142,3 +147,25 @@ async def test_on_message_credentials_expired_prompts_reauth(monkeypatch):
 
     assert "❌" in msg.reactions
     assert any("re-auth" in r.lower() or "auth" in r.lower() for r in msg.replies)
+
+
+@pytest.mark.asyncio
+async def test_on_message_rejects_long_video(monkeypatch):
+    from bot import main as m
+
+    m.CHANNEL_ID = 55
+    m.KEYWORD = "730radio"
+    m.PLAYLIST = "pl55"
+
+    added = []
+
+    monkeypatch.setattr(m, "video_exists", lambda v, p: False)
+    monkeypatch.setattr(m, "add_to_playlist", lambda v, p: added.append(v))
+    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 601)
+
+    msg = DummyMessage("730radio https://youtu.be/TOOLONG9999", channel_id=55)
+    await m.on_message(msg)
+
+    assert added == []
+    assert "⏱️" in msg.reactions
+    assert any("10 minutes" in reply for reply in msg.replies)

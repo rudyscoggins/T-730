@@ -6,6 +6,7 @@ This module expects OAuth credentials stored at ``data/creds.json`` by
 
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -157,8 +158,61 @@ def add_to_playlist(video_id: str, playlist_id: str) -> dict:
         raise RuntimeError(f"YouTube API error adding video: {e}") from e
 
 
+def _parse_iso8601_duration(duration: str) -> int:
+    """Parse a subset of ISO-8601 durations into total seconds."""
+
+    pattern = re.compile(
+        r"^P(?:(?P<days>\d+)D)?(?:T(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?)?$"
+    )
+    match = pattern.match(duration)
+    if not match:
+        raise ValueError(f"Unsupported ISO-8601 duration: {duration}")
+
+    parts = {k: int(v) if v else 0 for k, v in match.groupdict().items()}
+    total_seconds = (
+        parts["days"] * 24 * 3600
+        + parts["hours"] * 3600
+        + parts["minutes"] * 60
+        + parts["seconds"]
+    )
+    return total_seconds
+
+
+def get_video_duration_seconds(video_id: str) -> int:
+    """Return the duration of a video in seconds."""
+
+    service = _get_service()
+    try:
+        response = (
+            service.videos()
+            .list(part="contentDetails", id=video_id)
+            .execute()
+        )
+    except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        if status in (401, 403):
+            raise CredentialsExpiredError(_reauth_hint()) from e
+        raise RuntimeError(f"YouTube API error fetching video details: {e}") from e
+
+    items = response.get("items", [])
+    if not items:
+        raise RuntimeError(f"Video {video_id} not found or has no metadata")
+
+    duration = items[0].get("contentDetails", {}).get("duration")
+    if not duration:
+        raise RuntimeError(f"Video {video_id} missing duration metadata")
+
+    try:
+        return _parse_iso8601_duration(duration)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Video {video_id} has unsupported duration format: {duration}"
+        ) from exc
+
+
 __all__ = [
     "video_exists",
     "add_to_playlist",
+    "get_video_duration_seconds",
     "CredentialsExpiredError",
 ]
