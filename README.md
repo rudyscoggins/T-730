@@ -31,6 +31,7 @@ Optional extras:
 ## Testing
 - Install dev deps: `pip install -r requirements-dev.txt`
 - Run tests: `pytest -q`
+- For verbose output during debugging, run `pytest -vv` instead.
 
 Notes:
 - Tests mock Discord and YouTube clients; no network calls are made.
