@@ -1,7 +1,7 @@
 import os, re, logging, asyncio, time
 import discord
 from dotenv import load_dotenv
-from .youtube import add_to_playlist, video_exists
+from .youtube import add_to_playlist, video_exists, get_video_duration_seconds
 from .youtube import CredentialsExpiredError
 from .youtube.urls import canonical_video_ids_from_text
 
@@ -19,10 +19,24 @@ YTRX = re.compile(r"(?:youtu\.be/|youtube\.com/watch\?v=)([A-Za-z0-9_-]{11})",
 
 load_dotenv()  # grabs .env mounted by compose
 
-TOKEN      = os.getenv("DISCORD_TOKEN")
-CHANNEL_ID = int(os.getenv("CHANNEL_ID"))
-PLAYLIST   = os.getenv("PLAYLIST_ID")
-KEYWORD    = "730radio"
+
+def _int_from_env(name: str) -> int | None:
+    """Parse an integer environment variable, returning ``None`` if unset or invalid."""
+
+    raw = os.getenv(name)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logging.warning("Environment variable %s=%r is not a valid integer", name, raw)
+        return None
+
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+CHANNEL_ID = _int_from_env("CHANNEL_ID")
+PLAYLIST = os.getenv("PLAYLIST_ID")
+KEYWORD = "730radio"
 
 logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
@@ -31,6 +45,7 @@ bot = discord.Client(intents=intents)
 
 START_TIME = time.time()
 _health_started = False
+MAX_VIDEO_DURATION_SECONDS = 10 * 60
 
 
 async def _start_health_server() -> None:
@@ -81,13 +96,14 @@ async def on_ready():
                  PLAYLIST, CHANNEL_ID, health_port)
 
     # Optional: send a ready message to the configured channel
-    try:
-        ch = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
-        if ch:
-            await ch.send(f"730RadioBot is online. Listening for '" + KEYWORD + "'.")
-    except Exception:
-        # Non-fatal if we can't announce in channel
-        logging.debug("Ready announcement skipped or failed", exc_info=True)
+    if CHANNEL_ID is not None:
+        try:
+            ch = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
+            if ch:
+                await ch.send(f"730RadioBot is online. Listening for '" + KEYWORD + "'.")
+        except Exception:
+            # Non-fatal if we can't announce in channel
+            logging.debug("Ready announcement skipped or failed", exc_info=True)
 
 @bot.event
 async def on_message(msg: discord.Message):
@@ -106,6 +122,13 @@ async def on_message(msg: discord.Message):
         try:
             if video_exists(vid, PLAYLIST):
                 await msg.add_reaction("🔁")  # already there
+                continue
+            duration = get_video_duration_seconds(vid)
+            if duration > MAX_VIDEO_DURATION_SECONDS:
+                await msg.add_reaction("⏱️")
+                await msg.reply(
+                    "Videos longer than 10 minutes are not allowed on the playlist."
+                )
                 continue
             add_to_playlist(vid, PLAYLIST)
             await msg.add_reaction("✅")

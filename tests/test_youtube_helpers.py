@@ -3,7 +3,7 @@ import types
 import pytest
 
 
-def make_service(pages=None, insert_behavior=None):
+def make_service(pages=None, insert_behavior=None, video_response=None):
     """Create a fake YouTube API service with controllable behavior.
 
     pages: list of dicts to return from successive list().execute() calls.
@@ -35,9 +35,20 @@ def make_service(pages=None, insert_behavior=None):
 
             return Exec()
 
+    class VideosResource:
+        def list(self, **params):
+            class Exec:
+                def execute(self_inner):
+                    return video_response or {"items": []}
+
+            return Exec()
+
     class Service:
         def playlistItems(self):
             return PlaylistItemsResource()
+
+        def videos(self):
+            return VideosResource()
 
     return Service()
 
@@ -105,4 +116,24 @@ def test_add_to_playlist_wraps_http_error(monkeypatch):
         yt.add_to_playlist("vid123", "pl123")
 
     assert "YouTube API error adding video" in str(ei.value)
+
+
+def test_get_video_duration_seconds(monkeypatch):
+    from bot import youtube as yt
+
+    service = make_service(
+        video_response={
+            "items": [
+                {
+                    "contentDetails": {
+                        "duration": "PT9M59S",
+                    }
+                }
+            ]
+        }
+    )
+
+    monkeypatch.setattr(yt, "_get_service", lambda: service)
+
+    assert yt.get_video_duration_seconds("vid123") == 9 * 60 + 59
 
