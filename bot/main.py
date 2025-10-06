@@ -1,5 +1,12 @@
 import os, re, logging, asyncio, time
-import discord
+
+try:  # pragma: no cover - exercised indirectly via tests when discord missing
+    import discord  # type: ignore
+except Exception as exc:  # pragma: no cover - the fallback itself is tested
+    logging.getLogger(__name__).warning(
+        "discord import failed (%s); using lightweight stub", exc,
+    )
+    from . import discord_stub as discord  # type: ignore
 from dotenv import load_dotenv
 from .youtube import add_to_playlist, video_exists, get_video_duration_seconds
 from .youtube import CredentialsExpiredError

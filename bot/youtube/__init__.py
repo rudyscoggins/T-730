@@ -8,13 +8,21 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, Any
 
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from google.auth.exceptions import RefreshError
+if TYPE_CHECKING:  # pragma: no cover - import only for type checkers
+    from google.auth.transport.requests import Request as _Request
+    from google.oauth2.credentials import Credentials as _Credentials
+    from googleapiclient.discovery import build as _build
+    from googleapiclient.errors import HttpError as _HttpError
+    from google.auth.exceptions import RefreshError as _RefreshError
+
+Request: Any | None = None
+Credentials: Any | None = None
+build: Any | None = None
+HttpError: type[BaseException] = Exception
+RefreshError: type[BaseException] = Exception
+_GOOGLE_IMPORT_ERROR: Exception | None = None
 
 # Scopes: read + manage YouTube (playlist insert requires write scope)
 SCOPES = [
@@ -25,6 +33,42 @@ SCOPES = [
 class CredentialsExpiredError(RuntimeError):
     """Raised when Google OAuth credentials are invalid/expired and require re-auth."""
     pass
+
+
+def _ensure_google_dependencies() -> None:
+    """Import google-api-python-client pieces lazily with friendly errors."""
+
+    global Request, Credentials, build, HttpError, RefreshError, _GOOGLE_IMPORT_ERROR
+
+    if build is not None and Credentials is not None and Request is not None:
+        return
+
+    if _GOOGLE_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "google-api-python-client dependencies are unavailable. Install"
+            " bot/requirements.txt or set up the runtime image before running"
+            " YouTube helpers.",
+        ) from _GOOGLE_IMPORT_ERROR
+
+    try:
+        from google.auth.transport.requests import Request as _Request  # type: ignore
+        from google.oauth2.credentials import Credentials as _Credentials  # type: ignore
+        from googleapiclient.discovery import build as _build  # type: ignore
+        from googleapiclient.errors import HttpError as _HttpError  # type: ignore
+        from google.auth.exceptions import RefreshError as _RefreshError  # type: ignore
+    except Exception as exc:  # pragma: no cover - triggered when deps missing
+        _GOOGLE_IMPORT_ERROR = exc
+        raise RuntimeError(
+            "google-api-python-client dependencies are unavailable. Install"
+            " bot/requirements.txt or set up the runtime image before running"
+            " YouTube helpers.",
+        ) from exc
+
+    Request = _Request
+    Credentials = _Credentials
+    build = _build
+    HttpError = _HttpError
+    RefreshError = _RefreshError
 
 
 def _data_path(filename: str) -> Path:
@@ -59,6 +103,9 @@ def _load_credentials() -> Credentials:
     them via the auth helper.
     """
 
+    _ensure_google_dependencies()
+    assert Credentials is not None  # narrow type after lazy import
+
     creds_path = _data_path("creds.json")
     if not creds_path.exists():
         raise RuntimeError(
@@ -82,6 +129,8 @@ def _load_credentials() -> Credentials:
 def _get_service():
     """Build and return an authorized YouTube Data API client."""
 
+    _ensure_google_dependencies()
+    assert build is not None  # for type checkers after lazy import
     creds = _load_credentials()
     # Avoid discovery cache writes inside containers
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
@@ -95,6 +144,7 @@ def video_exists(video_id: str, playlist_id: str) -> bool:
     """
 
     service = _get_service()
+    playlist_items = service.playlistItems()
     page_token: Optional[str] = None
 
     while True:
@@ -108,7 +158,7 @@ def video_exists(video_id: str, playlist_id: str) -> bool:
 
         try:
             res = (
-                service.playlistItems()
+                playlist_items
                 .list(**params)
                 .execute()
             )
