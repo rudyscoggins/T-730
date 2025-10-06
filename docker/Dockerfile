@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends tzdata git && \
+    apt-get install -y --no-install-recommends tzdata git zlib1g && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
