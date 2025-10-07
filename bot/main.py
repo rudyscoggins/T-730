@@ -254,34 +254,47 @@ if tree is not None:
 
             add_to_playlist(vid, PLAYLIST)
 
-            # Public announcement in the channel for everyone
+            # Public announcement in the channel for everyone, with requester mention
             embed = _build_video_embed(meta)
+            user = getattr(interaction, "user", None)
+            user_mention = (
+                getattr(user, "mention", None)
+                or getattr(user, "name", None)
+                or "someone"
+            )
+            content_prefix = f"Added by {user_mention}"
             try:
                 channel = getattr(interaction, "channel", None)
                 if channel is None and CHANNEL_ID is not None:
                     channel = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
                 if channel is not None:
                     if embed is not None:
-                        await channel.send(embed=embed)
+                        await channel.send(content=content_prefix, embed=embed)
                     else:
                         await channel.send(
-                            f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                            content_prefix +
+                            f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
+                            f"{_format_duration(int(meta.get('duration_seconds',0)))})"
                         )
                 else:
                     # Fallback to non-ephemeral followup if channel isn't available
                     if embed is not None:
-                        await interaction.followup.send(embed=embed)
+                        await interaction.followup.send(content=content_prefix, embed=embed)
                     else:
                         await interaction.followup.send(
-                            f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                            content_prefix +
+                            f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
+                            f"{_format_duration(int(meta.get('duration_seconds',0)))})"
                         )
             except Exception:
                 logging.exception("Failed to post public confirmation; falling back to followup")
                 if embed is not None:
-                    await interaction.followup.send(embed=embed)
+                    await interaction.followup.send(content=content_prefix, embed=embed)
                 else:
                     await interaction.followup.send(
-                        f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                        content_prefix +
+                        f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
+                        f"{_format_duration(int(meta.get('duration_seconds',0)))})"
                     )
 
             # Private confirmation to the user
