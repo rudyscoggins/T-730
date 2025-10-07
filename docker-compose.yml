@@ -1,29 +1,28 @@
 services:
   radiobot:
-    build: 
-      context: .               # ?? send the whole repo
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/rudyscoggins/730radiobot:latest   # pulled from GHCR
     container_name: 730radiobot
-    env_file: .env          
+    env_file: .env
     volumes:
       - ./data:/app/data
-    # Use host networking so the OAuth loopback flow on http://localhost:PORT
-    # works reliably from inside the container on first run.
+    # Keep host networking for the OAuth loopback flow (http://localhost:PORT)
     network_mode: host
-    # Run as the host user so bind-mounted ./data is writable.
+    # Run as host user so bind-mounted ./data is writable
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     labels:
       - com.centurylinklabs.watchtower.scope=730radiobot
+      - com.centurylinklabs.watchtower.enable=true
     restart: unless-stopped
 
   watchtower:
     image: containrrr/watchtower:latest
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-    env_file: .env          
+    env_file: .env
     command: >
       --interval 180
       --scope 730radiobot
+      --cleanup
       -n shoutrrr
       --notification-url=telegram://${WATCHTOWER_TELEGRAM_TOKEN}@telegram?channels=${WATCHTOWER_TELEGRAM_CHAT_ID}
     restart: unless-stopped

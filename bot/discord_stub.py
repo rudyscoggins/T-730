@@ -39,6 +39,7 @@ class Client:
         self.loop = _Loop()
         self._ready = False
         self._events: dict[str, Callable[..., Any]] = {}
+        self.user = "discord-stub"
 
     def event(self, func: Callable[..., Any]) -> Callable[..., Any]:
         self._events[func.__name__] = func
@@ -60,4 +61,32 @@ class Client:
         self._ready = True
 
 
-__all__ = ["Client", "Intents"]
+class _Author:
+    def __init__(self, bot: bool = False) -> None:
+        self.bot = bot
+
+
+class _Channel:
+    def __init__(self, channel_id: int = 0) -> None:
+        self.id = channel_id
+
+
+class Message:
+    """Minimal stand-in for :class:`discord.Message`.
+
+    Only the attributes and methods accessed by our bot are provided.
+    """
+
+    def __init__(self, content: str = "", channel_id: int = 0, author_is_bot: bool = False) -> None:  # pragma: no cover - helper for tests only
+        self.content = content
+        self.channel = _Channel(channel_id)
+        self.author = _Author(author_is_bot)
+
+    async def add_reaction(self, _emoji: str) -> None:  # pragma: no cover - noop in stub
+        return None
+
+    async def reply(self, _content: str) -> None:  # pragma: no cover - noop in stub
+        return None
+
+
+__all__ = ["Client", "Intents", "Message"]
