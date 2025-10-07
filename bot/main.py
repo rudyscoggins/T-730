@@ -254,14 +254,38 @@ if tree is not None:
 
             add_to_playlist(vid, PLAYLIST)
 
-            # Public confirmation in-channel with rich metadata
+            # Public announcement in the channel for everyone
             embed = _build_video_embed(meta)
-            if embed is not None:
-                await interaction.followup.send(embed=embed)
-            else:
-                await interaction.followup.send(
-                    f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
-                )
+            try:
+                channel = getattr(interaction, "channel", None)
+                if channel is None and CHANNEL_ID is not None:
+                    channel = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
+                if channel is not None:
+                    if embed is not None:
+                        await channel.send(embed=embed)
+                    else:
+                        await channel.send(
+                            f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                        )
+                else:
+                    # Fallback to non-ephemeral followup if channel isn't available
+                    if embed is not None:
+                        await interaction.followup.send(embed=embed)
+                    else:
+                        await interaction.followup.send(
+                            f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                        )
+            except Exception:
+                logging.exception("Failed to post public confirmation; falling back to followup")
+                if embed is not None:
+                    await interaction.followup.send(embed=embed)
+                else:
+                    await interaction.followup.send(
+                        f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                    )
+
+            # Private confirmation to the user
+            await interaction.followup.send("Added to playlist. ✅", ephemeral=True)
         except CredentialsExpiredError as e:
             await interaction.followup.send(str(e), ephemeral=True)
         except Exception as e:
