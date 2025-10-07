@@ -8,7 +8,12 @@ except Exception as exc:  # pragma: no cover - the fallback itself is tested
     )
     from . import discord_stub as discord  # type: ignore
 from dotenv import load_dotenv
-from .youtube import add_to_playlist, video_exists, get_video_duration_seconds
+from .youtube import (
+    add_to_playlist,
+    video_exists,
+    get_video_duration_seconds,
+    get_video_metadata,
+)
 from .youtube import CredentialsExpiredError
 from .youtube.urls import canonical_video_ids_from_text
 
@@ -60,6 +65,34 @@ tree = app_commands.CommandTree(bot) if app_commands else None
 START_TIME = time.time()
 _health_started = False
 MAX_VIDEO_DURATION_SECONDS = 10 * 60
+
+
+def _format_duration(total_seconds: int) -> str:
+    h, rem = divmod(max(0, int(total_seconds)), 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02}:{s:02}"
+    return f"{m}:{s:02}"
+
+
+def _build_video_embed(meta: dict):
+    """Return a discord.Embed for the added video, or None if unsupported."""
+    Embed = getattr(discord, "Embed", None)
+    if Embed is None:
+        return None
+    title = meta.get("title") or meta.get("id")
+    url = meta.get("url")
+    channel = meta.get("channel_title") or ""
+    duration_s = int(meta.get("duration_seconds") or 0)
+    duration = _format_duration(duration_s)
+    embed = Embed(title=title, url=url, color=0x2ecc71)
+    if channel:
+        embed.set_author(name=channel)
+    embed.add_field(name="Duration", value=duration, inline=True)
+    thumb = meta.get("thumbnail_url")
+    if thumb:
+        embed.set_thumbnail(url=thumb)
+    return embed
 
 
 async def _start_health_server() -> None:
@@ -154,8 +187,8 @@ if ENABLE_MESSAGE_SCANNING:
                 if video_exists(vid, PLAYLIST):
                     await msg.add_reaction("🔁")
                     continue
-                duration = get_video_duration_seconds(vid)
-                if duration > MAX_VIDEO_DURATION_SECONDS:
+                meta = get_video_metadata(vid)
+                if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
                     await msg.add_reaction("⏱️")
                     await msg.reply(
                         "Videos longer than 10 minutes are not allowed on the playlist."
@@ -163,6 +196,13 @@ if ENABLE_MESSAGE_SCANNING:
                     continue
                 add_to_playlist(vid, PLAYLIST)
                 await msg.add_reaction("✅")
+                embed = _build_video_embed(meta)
+                if embed is not None:
+                    await msg.channel.send(embed=embed)
+                else:
+                    await msg.channel.send(
+                        f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                    )
             except CredentialsExpiredError as e:
                 await msg.add_reaction("❌")
                 await msg.reply(str(e))
@@ -186,7 +226,7 @@ if tree is not None:
                 )
                 return
 
-            await interaction.response.defer(thinking=True, ephemeral=True)
+            await interaction.response.defer(thinking=True)
 
             vids = canonical_video_ids_from_text(url)
             if not vids:
@@ -204,8 +244,8 @@ if tree is not None:
                 )
                 return
 
-            duration = get_video_duration_seconds(vid)
-            if duration > MAX_VIDEO_DURATION_SECONDS:
+            meta = get_video_metadata(vid)
+            if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
                 await interaction.followup.send(
                     "Videos longer than 10 minutes are not allowed on the playlist.",
                     ephemeral=True,
@@ -213,9 +253,15 @@ if tree is not None:
                 return
 
             add_to_playlist(vid, PLAYLIST)
-            await interaction.followup.send(
-                f"Added `{vid}` to the playlist. ✅", ephemeral=True
-            )
+
+            # Public confirmation in-channel with rich metadata
+            embed = _build_video_embed(meta)
+            if embed is not None:
+                await interaction.followup.send(embed=embed)
+            else:
+                await interaction.followup.send(
+                    f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
+                )
         except CredentialsExpiredError as e:
             await interaction.followup.send(str(e), ephemeral=True)
         except Exception as e:

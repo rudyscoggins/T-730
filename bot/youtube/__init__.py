@@ -264,5 +264,53 @@ __all__ = [
     "video_exists",
     "add_to_playlist",
     "get_video_duration_seconds",
+    "get_video_metadata",
     "CredentialsExpiredError",
 ]
+
+
+def get_video_metadata(video_id: str) -> dict:
+    """Return basic metadata for a video.
+
+    Includes: ``id``, ``title``, ``channel_title``, ``duration_seconds``,
+    ``url``, and ``thumbnail_url`` (best-effort).
+    """
+
+    service = _get_service()
+    try:
+        response = (
+            service.videos()
+            .list(part="snippet,contentDetails", id=video_id)
+            .execute()
+        )
+    except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        if status in (401, 403):
+            raise CredentialsExpiredError(_reauth_hint()) from e
+        raise RuntimeError(f"YouTube API error fetching video details: {e}") from e
+
+    items = response.get("items", [])
+    if not items:
+        raise RuntimeError(f"Video {video_id} not found or has no metadata")
+
+    item = items[0]
+    snippet = item.get("snippet", {})
+    content = item.get("contentDetails", {})
+
+    duration_iso = content.get("duration") or "PT0S"
+    duration_seconds = _parse_iso8601_duration(duration_iso)
+
+    thumbs = (snippet.get("thumbnails") or {})
+    thumb = (
+        thumbs.get("maxres") or thumbs.get("standard") or
+        thumbs.get("high") or thumbs.get("medium") or thumbs.get("default") or {}
+    )
+
+    return {
+        "id": video_id,
+        "title": snippet.get("title") or video_id,
+        "channel_title": snippet.get("channelTitle") or "",
+        "duration_seconds": duration_seconds,
+        "url": f"https://youtu.be/{video_id}",
+        "thumbnail_url": thumb.get("url"),
+    }
