@@ -1,4 +1,4 @@
-import os, re, logging, asyncio, time
+import os, logging, asyncio, time
 
 try:  # pragma: no cover - exercised indirectly via tests when discord missing
     import discord  # type: ignore
@@ -11,23 +11,15 @@ from dotenv import load_dotenv
 from .youtube import (
     add_to_playlist,
     video_exists,
-    get_video_duration_seconds,
     get_video_metadata,
 )
 from .youtube import CredentialsExpiredError
-from .youtube.urls import canonical_video_ids_from_text
-
 try:
     # discord.py depends on aiohttp; use it for an in-process health endpoint
     from aiohttp import web  # type: ignore
 except Exception:  # pragma: no cover - only if aiohttp missing at runtime
     web = None  # type: ignore
 from .youtube.urls import canonical_video_ids_from_text
-
-# Legacy regex retained for compatibility if needed, but URL parsing below
-# now handles multiple variants and deduplication.
-YTRX = re.compile(r"(?:youtu\.be/|youtube\.com/watch\?v=)([A-Za-z0-9_-]{11})",
-                  re.IGNORECASE)
 
 load_dotenv()  # grabs .env mounted by compose
 
@@ -93,6 +85,63 @@ def _build_video_embed(meta: dict):
     if thumb:
         embed.set_thumbnail(url=thumb)
     return embed
+
+
+def _format_added_line(meta: dict) -> str:
+    """Return a concise plain-text description of the added video."""
+    title = meta.get("title", "")
+    channel = meta.get("channel_title", "")
+    duration = _format_duration(int(meta.get("duration_seconds", 0)))
+    return f"Added: {title} — {channel} ({duration})"
+
+
+async def _announce_added(
+    *,
+    meta: dict,
+    content_prefix: str | None,
+    channel,
+    fallback_sender,
+) -> None:
+    """Send a public announcement with optional prefix and embed.
+
+    Tries the provided ``channel`` first; if unavailable, uses the
+    ``fallback_sender`` callable (e.g., ``interaction.followup.send``).
+    """
+    embed = _build_video_embed(meta)
+    line = _format_added_line(meta)
+    content = (f"{content_prefix} — {line}") if content_prefix else line
+
+    try:
+        if channel is not None:
+            if embed is not None:
+                await channel.send(content=content_prefix or None, embed=embed)
+            else:
+                await channel.send(content)
+            return
+    except Exception:
+        logging.exception("Failed to post in channel; will try fallback")
+
+    # Fallback path if channel was None or send failed
+    if embed is not None:
+        await fallback_sender(content=content_prefix or None, embed=embed)
+    else:
+        await fallback_sender(content)
+
+
+async def _resolve_channel_for_interaction(interaction):
+    """Return a channel object for an interaction, preferring the current one.
+
+    Falls back to the configured ``CHANNEL_ID`` if necessary.
+    """
+    channel = getattr(interaction, "channel", None)
+    if channel is not None:
+        return channel
+    if CHANNEL_ID is not None:
+        try:
+            return bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
+        except Exception:
+            logging.debug("Failed to fetch fallback channel", exc_info=True)
+    return None
 
 
 async def _start_health_server() -> None:
@@ -196,13 +245,12 @@ if ENABLE_MESSAGE_SCANNING:
                     continue
                 add_to_playlist(vid, PLAYLIST)
                 await msg.add_reaction("✅")
-                embed = _build_video_embed(meta)
-                if embed is not None:
-                    await msg.channel.send(embed=embed)
-                else:
-                    await msg.channel.send(
-                        f"Added: {meta.get('title','')} — {meta.get('channel_title','')} ({_format_duration(int(meta.get('duration_seconds',0)))})"
-                    )
+                await _announce_added(
+                    meta=meta,
+                    content_prefix=None,
+                    channel=msg.channel,
+                    fallback_sender=msg.channel.send,
+                )
             except CredentialsExpiredError as e:
                 await msg.add_reaction("❌")
                 await msg.reply(str(e))
@@ -255,7 +303,6 @@ if tree is not None:
             add_to_playlist(vid, PLAYLIST)
 
             # Public announcement in the channel for everyone, with requester mention
-            embed = _build_video_embed(meta)
             user = getattr(interaction, "user", None)
             user_mention = (
                 getattr(user, "mention", None)
@@ -263,42 +310,15 @@ if tree is not None:
                 or "someone"
             )
             content_prefix = f"Added by {user_mention}"
-            try:
-                channel = getattr(interaction, "channel", None)
-                if channel is None and CHANNEL_ID is not None:
-                    channel = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
-                if channel is not None:
-                    if embed is not None:
-                        await channel.send(content=content_prefix, embed=embed)
-                    else:
-                        await channel.send(
-                            content_prefix +
-                            f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
-                            f"{_format_duration(int(meta.get('duration_seconds',0)))})"
-                        )
-                else:
-                    # Fallback to non-ephemeral followup if channel isn't available
-                    if embed is not None:
-                        await interaction.followup.send(content=content_prefix, embed=embed)
-                    else:
-                        await interaction.followup.send(
-                            content_prefix +
-                            f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
-                            f"{_format_duration(int(meta.get('duration_seconds',0)))})"
-                        )
-            except Exception:
-                logging.exception("Failed to post public confirmation; falling back to followup")
-                if embed is not None:
-                    await interaction.followup.send(content=content_prefix, embed=embed)
-                else:
-                    await interaction.followup.send(
-                        content_prefix +
-                        f" — Added: {meta.get('title','')} — {meta.get('channel_title','')} ("
-                        f"{_format_duration(int(meta.get('duration_seconds',0)))})"
-                    )
+            channel = await _resolve_channel_for_interaction(interaction)
+            await _announce_added(
+                meta=meta,
+                content_prefix=content_prefix,
+                channel=channel,
+                fallback_sender=interaction.followup.send,
+            )
 
-            # Private confirmation to the user
-            await interaction.followup.send("Added to playlist. ✅", ephemeral=True)
+            # Intentionally no ephemeral success message to avoid redundancy
         except CredentialsExpiredError as e:
             await interaction.followup.send(str(e), ephemeral=True)
         except Exception as e:
