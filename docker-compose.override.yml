@@ -1,5 +1,6 @@
 services:
   radiobot:
+    container_name: 730radiobot-staging
     build:
       context: .
       dockerfile: docker/Dockerfile
