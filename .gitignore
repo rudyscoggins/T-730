@@ -1,4 +1,5 @@
 # secrets / runtime state
+docker-compose.override.yml
 .env
 data/
 
