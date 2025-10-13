@@ -1,4 +1,4 @@
-# 730RadioBot
+# T-730
 
 Discord bot that adds YouTube links (tagged with a keyword) to a playlist using the YouTube Data API.
 
