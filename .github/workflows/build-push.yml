@@ -36,4 +36,4 @@ jobs:
           platforms: linux/arm/v7,linux/amd64
           push: true
           # ??  explicit tag change
-          tags: ghcr.io/${{ github.actor }}/730radiobot:latest
+          tags: ghcr.io/${{ github.actor }}/T-730:latest
