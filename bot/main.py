@@ -21,6 +21,57 @@ except Exception:  # pragma: no cover - only if aiohttp missing at runtime
     web = None  # type: ignore
 from .youtube.urls import canonical_video_ids_from_text
 
+# Best-effort detection of Discord HTTP errors without tightly coupling to discord.py
+def _is_unknown_interaction_error(exc: Exception) -> bool:
+    """Return True if the exception looks like a 10062 Unknown interaction error.
+
+    Works across discord.py versions by checking common attributes and message text.
+    """
+    try:
+        # discord.NotFound or HTTPException often carry .code or .status
+        code = getattr(exc, "code", None)
+        status = getattr(getattr(exc, "response", None), "status", None) or getattr(exc, "status", None)
+        message = str(exc)
+        if code == 10062:
+            return True
+        if (status == 404) and ("Unknown interaction" in message or "10062" in message):
+            return True
+        # Some variants embed json with code/message
+        if "Unknown interaction" in message:
+            return True
+    except Exception:
+        pass
+    return False
+
+async def _safe_followup_send(interaction, content: str | None = None, *, ephemeral: bool = True, embed=None):
+    """Attempt to send an interaction followup; fall back to channel on Unknown interaction.
+
+    If the interaction token has expired (10062), try posting in the resolved
+    channel instead so users still get feedback.
+    """
+    try:
+        if embed is not None:
+            await interaction.followup.send(content=content, ephemeral=ephemeral, embed=embed)
+        else:
+            await interaction.followup.send(content, ephemeral=ephemeral)
+    except Exception as exc:
+        if _is_unknown_interaction_error(exc):
+            logging.debug("Interaction followup token expired; falling back to channel")
+            try:
+                ch = await _resolve_channel_for_interaction(interaction)
+                if ch is not None:
+                    if embed is not None:
+                        await ch.send(content=content, embed=embed)
+                    else:
+                        await ch.send(content or "")
+                    return
+            except Exception:
+                logging.debug("Channel fallback after Unknown interaction failed", exc_info=True)
+            # Give up quietly if both paths fail
+            return
+        # Re-raise unexpected errors
+        raise
+
 load_dotenv()  # grabs .env mounted by compose
 
 
@@ -122,10 +173,17 @@ async def _announce_added(
         logging.exception("Failed to post in channel; will try fallback")
 
     # Fallback path if channel was None or send failed
-    if embed is not None:
-        await fallback_sender(content=content_prefix or None, embed=embed)
-    else:
-        await fallback_sender(content)
+    try:
+        if embed is not None:
+            await fallback_sender(content=content_prefix or None, embed=embed)
+        else:
+            await fallback_sender(content)
+    except Exception as exc:
+        # Swallow Unknown interaction errors (token expired) to avoid noisy exceptions
+        if _is_unknown_interaction_error(exc):
+            logging.debug("Fallback sender hit Unknown interaction; suppressing")
+            return
+        raise
 
 
 async def _resolve_channel_for_interaction(interaction):
@@ -208,15 +266,7 @@ async def on_ready():
         except Exception:
             logging.exception("Failed to sync slash commands")
 
-    # Optional: send a ready message to the configured channel
-    if CHANNEL_ID is not None:
-        try:
-            ch = bot.get_channel(CHANNEL_ID) or await bot.fetch_channel(CHANNEL_ID)
-            if ch:
-                await ch.send(f"T-730 operational.  Listening for {KEYWORD}")
-        except Exception:
-            # Non-fatal if we can't announce in channel
-            logging.debug("Ready announcement skipped or failed", exc_info=True)
+    # Ready announcement intentionally removed to avoid extra noise in the channel
 
 # Optional legacy keyword scanning (can be disabled via ENABLE_MESSAGE_SCANNING=0)
 if ENABLE_MESSAGE_SCANNING:
@@ -274,11 +324,14 @@ if tree is not None:
                 )
                 return
 
-            await interaction.response.defer(thinking=True)
+            # Defer early to allow slower YouTube API calls, but do it silently
+            # (no visible "thinking…" message) to avoid double confirmations.
+            await interaction.response.defer()
 
             vids = canonical_video_ids_from_text(url)
             if not vids:
-                await interaction.followup.send(
+                await _safe_followup_send(
+                    interaction,
                     "No valid YouTube video URL found.", ephemeral=True
                 )
                 return
@@ -287,14 +340,16 @@ if tree is not None:
             vid = vids[0]
 
             if video_exists(vid, PLAYLIST):
-                await interaction.followup.send(
+                await _safe_followup_send(
+                    interaction,
                     f"Video `{vid}` is already in the playlist. 🔁", ephemeral=True
                 )
                 return
 
             meta = get_video_metadata(vid)
             if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
-                await interaction.followup.send(
+                await _safe_followup_send(
+                    interaction,
                     "Videos longer than 10 minutes are not allowed on the playlist.",
                     ephemeral=True,
                 )
@@ -320,12 +375,14 @@ if tree is not None:
 
             # Intentionally no ephemeral success message to avoid redundancy
         except CredentialsExpiredError as e:
-            await interaction.followup.send(str(e), ephemeral=True)
+            await _safe_followup_send(interaction, str(e), ephemeral=True)
         except Exception as e:
             logging.exception("Couldn't add video via slash command: %s", url)
-            await interaction.followup.send(
-                f"Couldn't add video: {e}", ephemeral=True
-            )
+            # Try to inform the user; suppress Unknown interaction error
+            try:
+                await _safe_followup_send(interaction, f"Couldn't add video: {e}", ephemeral=True)
+            except Exception:
+                logging.debug("Failed to notify user about error", exc_info=True)
 
 if __name__ == "__main__":
     bot.run(TOKEN)
