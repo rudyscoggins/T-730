@@ -53,15 +53,24 @@ def _extract_video_id_from_url(url: str) -> Optional[str]:
 def canonical_video_ids_from_text(text: str) -> List[str]:
     """Return ordered unique list of 11-char video IDs found in text.
 
-    Parses URLs and extracts IDs from common YouTube URL variants.
+    Parses URLs and extracts IDs from common YouTube URL variants. Accepts
+    scheme-less inputs like ``youtube.com/watch?v=...`` as well.
     """
 
-    # Quick-and-simple URL finder; avoids heavy URL parsing of entire message.
-    url_candidates = re.findall(r"https?://[^\s<>]+", text)
+    # Find explicit http(s) URLs first
+    candidates = list(re.findall(r"https?://[^\s<>]+", text))
+
+    # Also accept bare youtube links without scheme (e.g., youtube.com/... or youtu.be/...)
+    bare_matches = re.findall(r"(?:(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s<>]+)", text, flags=re.IGNORECASE)
+    candidates.extend(bare_matches)
+
     seen = set()
     out: List[str] = []
-    for cand in url_candidates:
+    for cand in candidates:
         url = _clean_url_token(cand)
+        # Normalize scheme-less links to https for parsing
+        if "://" not in url:
+            url = "https://" + url
         vid = _extract_video_id_from_url(url)
         if vid and vid not in seen:
             seen.add(vid)
@@ -72,4 +81,3 @@ def canonical_video_ids_from_text(text: str) -> List[str]:
 __all__ = [
     "canonical_video_ids_from_text",
 ]
-

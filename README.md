@@ -1,58 +1,65 @@
 # T-730
 
-Discord bot that adds YouTube links (tagged with a keyword) to a playlist using the YouTube Data API.
+Self-hosted Discord bot that watches for messages containing the keyword "730Radio" and a YouTube link, then adds the video to a shared YouTube playlist via the YouTube Data API v3. Designed to run on a Raspberry Pi in Docker.
+
+## Quick Start (Raspberry Pi)
+1. Choose stack directory on RPIZelda (`192.168.86.41`):
+   - Staging: `~/docker/T-730/T-730-Staging`
+   - Production: `~/docker/T-730/T-730-Prod`
+2. Copy env and configure:
+   - `cp .env.example .env`
+   - Set `DISCORD_TOKEN`, `CHANNEL_ID`, `PLAYLIST_ID`, `COMPOSE_PROJECT_NAME`, `HEALTH_PORT` (and optionally `OAUTH_PORT`, `HOST_UID`, `HOST_GID`).
+3. Add Google OAuth client secrets:
+   - Place `data/client_secrets.json` (or point `GOOGLE_CLIENT_SECRET_FILE` to it).
+4. Build and run (Compose service is `radiobot`):
+   - `docker compose up -d --build`
+5. Complete first-run OAuth (via SSH tunnel):
+   - From your laptop: `ssh -L 8080:localhost:8080 pi@192.168.86.41`
+   - Open `http://localhost:${OAUTH_PORT:-8080}` and authorize.
+   - Tokens persist at `data/creds.json`.
+6. Verify health:
+   - `curl http://localhost:${HEALTH_PORT}/healthz` → `{ "status": "ok", ... }`
 
 ## Local Development
 - Create venv and install deps:
   - `python -m venv .venv && source .venv/bin/activate`
   - `pip install -r bot/requirements.txt`
-  - (optional for tests) `pip install -r requirements-dev.txt`
 - Run the bot (requires `.env`):
   - `python -m bot.main`
+- Optional dev deps and tests:
+  - `pip install -r requirements-dev.txt`
+  - `pytest -q`
 
-First run needs YouTube OAuth credentials in `data/`:
-- Place your Google OAuth client JSON at `data/client_secrets.json`.
-- Generate user creds: `python -m bot.youtube.auth` (saves `data/creds.json`).
-
-## Raspberry Pi: PyPI‑only installs (piwheels SSL workaround)
-On some Pi setups, pip may hit SSL errors from `piwheels.org` (e.g., certificate expired) when installing Google client libs. To force a PyPI‑only install just for this session, run:
-
-- `python -m venv .venv && source .venv/bin/activate`
-- `PIP_CONFIG_FILE=$(mktemp) PIP_EXTRA_INDEX_URL= pip install --no-cache-dir --index-url https://pypi.org/simple -r bot/requirements.txt`
-
-Optional extras:
-- Lint: `pip install ruff && ruff check bot`
-- Quick import check: `python -c "import bot.main; print('Import OK')"`
-
-## Docker
-- Build and run: `docker compose up --build radiobot`
-- First run triggers OAuth helper inside the container to create `data/creds.json`.
-
-## Testing
-- Install dev deps: `pip install -r requirements-dev.txt`
-- Run tests: `pytest -q`
-- For verbose output during debugging, run `pytest -vv` instead.
-
-Notes:
-- Tests mock Discord and YouTube clients; no network calls are made.
-- Importing `bot.main` will not start the client; it runs only under `python -m bot.main`.
-
-## Health Check
-- The bot starts a lightweight HTTP endpoint for liveness/readiness:
-  - URL: `http://localhost:${HEALTH_PORT:-8081}/healthz`
-  - Response: `{ "status": "ok", "ready": true|false, "uptime_s": <int> }`
-- On startup, logs a single `READY` line with playlist, channel, and health URL.
-- Configure host/port via env: `HEALTH_HOST`, `HEALTH_PORT`.
-
-## Token Rotation (Google OAuth)
-- If YouTube credentials expire or are revoked, the bot will reply with a clear
-  re-auth message in Discord and log an error.
-- Re-auth options:
+## OAuth Setup
+- Required files in `data/`:
+  - `client_secrets.json` (download from Google Cloud Console)
+  - `creds.json` (generated on first run)
+- Re-auth if needed:
   - Local: `python -m bot.youtube.auth`
   - Docker: `docker compose run --rm -e OAUTH_FORCE=1 radiobot`
-- This regenerates `data/creds.json`. You can also delete `data/creds.json` and run the container to trigger auth.
+
+## Bot Behavior
+- Detects keyword "730Radio" (case-insensitive) and YouTube links (`youtu.be/...` or `youtube.com/watch?v=`).
+- Extracts the video ID, appends to the playlist, and skips duplicates.
+- Reacts with ✅ on success or ❌ on failure.
+- Exposes `GET /healthz` on `HEALTH_PORT` for liveness/readiness.
+
+## Troubleshooting
+- Pi wheels SSL errors: force PyPI-only install locally if needed:
+  - `PIP_CONFIG_FILE=$(mktemp) PIP_EXTRA_INDEX_URL= pip install --no-cache-dir --index-url https://pypi.org/simple -r bot/requirements.txt`
+- OAuth issues: delete `data/creds.json` and re-run (or use `OAUTH_FORCE=1`). Ensure SSH tunnel matches `OAUTH_PORT`.
+- Permissions: set `HOST_UID`/`HOST_GID` in `.env` so the container can write to `data/`.
 
 ## Configuration
-Copy `.env.example` to `.env` and fill in:
+Set via `.env`:
 - `DISCORD_TOKEN`, `CHANNEL_ID`, `PLAYLIST_ID`
-- Optional: `OAUTH_PORT` for local-server OAuth mode
+- `OAUTH_PORT` (OAuth callback), `HEALTH_PORT` (health endpoint)
+- `COMPOSE_PROJECT_NAME`, `HOST_UID`, `HOST_GID`
+- `GOOGLE_CLIENT_SECRET_FILE` (optional path override)
+
+## Deploy to Production
+1. Merge PRs into `main` on GitHub.
+2. On RPIZelda:
+   - `cd ~/docker/T-730/T-730-Prod`
+   - `git pull origin main`
+   - `docker compose up -d --build`
