@@ -43,20 +43,44 @@ def _is_unknown_interaction_error(exc: Exception) -> bool:
         pass
     return False
 
-async def _safe_followup_send(interaction, content: str | None = None, *, ephemeral: bool = True, embed=None):
-    """Attempt to send an interaction followup; fall back to channel on Unknown interaction.
+async def _safe_followup_send(
+    interaction,
+    content: str | None = None,
+    *,
+    ephemeral: bool = True,
+    embed=None,
+):
+    """Attempt to reply to an interaction while hiding Discord's thinking state."""
 
-    If the interaction token has expired (10062), try posting in the resolved
-    channel instead so users still get feedback.
-    """
     try:
+        if getattr(interaction, "response", None) and interaction.response.is_done():
+            try:
+                if embed is not None:
+                    await interaction.edit_original_response(content=content, embed=embed)
+                else:
+                    await interaction.edit_original_response(content=content)
+                return
+            except Exception:
+                logging.debug("edit_original_response failed; will try followup", exc_info=True)
+
+        if getattr(interaction, "response", None) and not interaction.response.is_done():
+            if embed is not None:
+                await interaction.response.send_message(
+                    content=content,
+                    ephemeral=ephemeral,
+                    embed=embed,
+                )
+            else:
+                await interaction.response.send_message(content, ephemeral=ephemeral)
+            return
+
         if embed is not None:
             await interaction.followup.send(content=content, ephemeral=ephemeral, embed=embed)
         else:
             await interaction.followup.send(content, ephemeral=ephemeral)
     except Exception as exc:
         if _is_unknown_interaction_error(exc):
-            logging.debug("Interaction followup token expired; falling back to channel")
+            logging.debug("Interaction response token expired; falling back to channel")
             try:
                 ch = await _resolve_channel_for_interaction(interaction)
                 if ch is not None:
@@ -67,9 +91,7 @@ async def _safe_followup_send(interaction, content: str | None = None, *, epheme
                     return
             except Exception:
                 logging.debug("Channel fallback after Unknown interaction failed", exc_info=True)
-            # Give up quietly if both paths fail
             return
-        # Re-raise unexpected errors
         raise
 
 load_dotenv()  # grabs .env mounted by compose
@@ -343,7 +365,7 @@ if tree is not None:
 
             # Defer early to allow slower YouTube API calls, but do it silently
             # (no visible "thinking…" message) to avoid double confirmations.
-            await interaction.response.defer()
+            await interaction.response.defer(ephemeral=True)
 
             vids = canonical_video_ids_from_text(url)
             if not vids:
@@ -390,7 +412,12 @@ if tree is not None:
                 fallback_sender=interaction.followup.send,
             )
 
-            # Intentionally no ephemeral success message to avoid redundancy
+            # Always clear the deferred "thinking" state with an ephemeral ack
+            await _safe_followup_send(
+                interaction,
+                "Video added to the playlist. ✅",
+                ephemeral=True,
+            )
         except CredentialsExpiredError as e:
             await _safe_followup_send(interaction, str(e), ephemeral=True)
         except Exception as e:
