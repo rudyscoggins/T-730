@@ -11,6 +11,10 @@ class DummyAuthor:
 class DummyChannel:
     def __init__(self, id):
         self.id = id
+        self.sent_messages = []
+
+    async def send(self, content=None, *, embed=None):
+        self.sent_messages.append({"content": content, "embed": embed})
 
 
 class DummyMessage:
@@ -45,8 +49,17 @@ async def test_on_message_adds_two_videos(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         added.append((video_id, playlist_id))
 
-    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 120)
+    def fake_metadata(video_id):
+        return {
+            "id": video_id,
+            "title": f"Video {video_id}",
+            "channel_title": "Test Channel",
+            "duration_seconds": 120,
+            "url": f"https://youtu.be/{video_id}",
+            "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/default.jpg",
+        }
 
+    monkeypatch.setattr(m, "get_video_metadata", fake_metadata)
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
@@ -78,7 +91,17 @@ async def test_on_message_duplicate_and_success(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         added.append(video_id)
 
-    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 60)
+    def fake_metadata(video_id):
+        return {
+            "id": video_id,
+            "title": f"Video {video_id}",
+            "channel_title": "Test Channel",
+            "duration_seconds": 60,
+            "url": f"https://youtu.be/{video_id}",
+            "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/default.jpg",
+        }
+
+    monkeypatch.setattr(m, "get_video_metadata", fake_metadata)
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
@@ -111,7 +134,20 @@ async def test_on_message_ignores_wrong_channel_or_no_keyword(monkeypatch):
     def fake_add_to_playlist(video_id, playlist_id):
         called["add"] += 1
 
-    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 30)
+    metadata_calls = []
+
+    def fake_metadata(video_id):
+        metadata_calls.append(video_id)
+        return {
+            "id": video_id,
+            "title": f"Video {video_id}",
+            "channel_title": "Test Channel",
+            "duration_seconds": 30,
+            "url": f"https://youtu.be/{video_id}",
+            "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/default.jpg",
+        }
+
+    monkeypatch.setattr(m, "get_video_metadata", fake_metadata)
     monkeypatch.setattr(m, "video_exists", fake_video_exists)
     monkeypatch.setattr(m, "add_to_playlist", fake_add_to_playlist)
 
@@ -124,6 +160,7 @@ async def test_on_message_ignores_wrong_channel_or_no_keyword(monkeypatch):
     await m.on_message(msg2)
 
     assert called == {"exists": 0, "add": 0}
+    assert metadata_calls == []
 
 
 @pytest.mark.asyncio
@@ -138,7 +175,18 @@ async def test_on_message_credentials_expired_prompts_reauth(monkeypatch):
     def raise_expired(video_id, playlist_id):
         raise CredentialsExpiredError("Please re-auth")
 
-    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 120)
+    monkeypatch.setattr(
+        m,
+        "get_video_metadata",
+        lambda video_id: {
+            "id": video_id,
+            "title": f"Video {video_id}",
+            "channel_title": "Test Channel",
+            "duration_seconds": 120,
+            "url": f"https://youtu.be/{video_id}",
+            "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/default.jpg",
+        },
+    )
     monkeypatch.setattr(m, "video_exists", lambda v, p: False)
     monkeypatch.setattr(m, "add_to_playlist", raise_expired)
 
@@ -161,7 +209,18 @@ async def test_on_message_rejects_long_video(monkeypatch):
 
     monkeypatch.setattr(m, "video_exists", lambda v, p: False)
     monkeypatch.setattr(m, "add_to_playlist", lambda v, p: added.append(v))
-    monkeypatch.setattr(m, "get_video_duration_seconds", lambda vid: 601)
+    monkeypatch.setattr(
+        m,
+        "get_video_metadata",
+        lambda video_id: {
+            "id": video_id,
+            "title": "Long Video",
+            "channel_title": "Test Channel",
+            "duration_seconds": 601,
+            "url": f"https://youtu.be/{video_id}",
+            "thumbnail_url": f"https://img.youtube.com/vi/{video_id}/default.jpg",
+        },
+    )
 
     msg = DummyMessage("730radio https://youtu.be/TOOLONG9999", channel_id=55)
     await m.on_message(msg)
