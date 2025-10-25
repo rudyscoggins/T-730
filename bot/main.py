@@ -88,12 +88,29 @@ def _int_from_env(name: str) -> int | None:
         return None
 
 
+def _bool_from_env(name: str, *, default: bool) -> bool:
+    """Return a boolean parsed from the environment, accepting common truthy strings."""
+
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+
+    logging.warning("Environment variable %s=%r is not a recognized boolean", name, raw)
+    return default
+
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = _int_from_env("CHANNEL_ID")
 GUILD_ID = _int_from_env("GUILD_ID")
 PLAYLIST = os.getenv("PLAYLIST_ID")
 KEYWORD = "730radio"
-ENABLE_MESSAGE_SCANNING = os.getenv("ENABLE_MESSAGE_SCANNING", "1") == "1"
+ENABLE_MESSAGE_SCANNING = _bool_from_env("ENABLE_MESSAGE_SCANNING", default=True)
 
 logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
