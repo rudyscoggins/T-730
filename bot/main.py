@@ -390,7 +390,12 @@ if tree is not None:
                 fallback_sender=interaction.followup.send,
             )
 
-            # Intentionally no ephemeral success message to avoid redundancy
+            # Always clear the deferred "thinking" state with an ephemeral ack
+            await _safe_followup_send(
+                interaction,
+                "Video added to the playlist. ✅",
+                ephemeral=True,
+            )
         except CredentialsExpiredError as e:
             await _safe_followup_send(interaction, str(e), ephemeral=True)
         except Exception as e:
