@@ -1,4 +1,5 @@
 import os, logging, asyncio, time
+from typing import Callable, TypeVar, Any
 
 try:  # pragma: no cover - exercised indirectly via tests when discord missing
     import discord  # type: ignore
@@ -20,6 +21,65 @@ try:
 except Exception:  # pragma: no cover - only if aiohttp missing at runtime
     web = None  # type: ignore
 from .youtube.urls import canonical_video_ids_from_text
+
+_T = TypeVar("_T")
+
+_FAST_RETRY_DELAY_SECONDS = 5
+_FAST_RETRY_ATTEMPTS = 10
+_SLOW_RETRY_DELAYS = (60, 300, 600)
+_RETRY_WAIT_SECONDS: tuple[int, ...] = (
+    (0,)
+    + (_FAST_RETRY_DELAY_SECONDS,) * _FAST_RETRY_ATTEMPTS
+    + _SLOW_RETRY_DELAYS
+)
+_NON_RETRYABLE_EXCEPTIONS = (CredentialsExpiredError,)
+
+
+async def _call_with_retry(
+    func: Callable[..., _T],
+    *args: Any,
+    description: str | None = None,
+    **kwargs: Any,
+) -> _T:
+    """Execute ``func`` with exponential backoff style retries.
+
+    Performs quick retries every 5 seconds for the first ten failures and then
+    slows down to 1, 5, and 10 minute intervals before giving up.
+    """
+
+    desc = description or getattr(func, "__name__", "operation")
+    total_attempts = len(_RETRY_WAIT_SECONDS)
+    last_exc: BaseException | None = None
+
+    for attempt, wait_seconds in enumerate(_RETRY_WAIT_SECONDS, start=1):
+        if attempt > 1 and wait_seconds:
+            logging.info(
+                "Retrying %s in %s seconds (attempt %s/%s)",
+                desc,
+                wait_seconds,
+                attempt,
+                total_attempts,
+            )
+            await asyncio.sleep(wait_seconds)
+
+        try:
+            return await asyncio.to_thread(func, *args, **kwargs)
+        except _NON_RETRYABLE_EXCEPTIONS:
+            raise
+        except Exception as exc:  # pragma: no cover - exercised via tests
+            last_exc = exc
+            if attempt == total_attempts:
+                break
+            logging.warning(
+                "Attempt %s/%s for %s failed: %s",
+                attempt,
+                total_attempts,
+                desc,
+                exc,
+            )
+
+    assert last_exc is not None  # For mypy; we only exit loop on failure
+    raise last_exc
 
 # Best-effort detection of Discord HTTP errors without tightly coupling to discord.py
 def _is_unknown_interaction_error(exc: Exception) -> bool:
@@ -322,17 +382,31 @@ if ENABLE_MESSAGE_SCANNING:
 
         for vid in vids:
             try:
-                if video_exists(vid, PLAYLIST):
+                if await _call_with_retry(
+                    video_exists,
+                    vid,
+                    PLAYLIST,
+                    description=f"check playlist for {vid}",
+                ):
                     await msg.add_reaction("🔁")
                     continue
-                meta = get_video_metadata(vid)
+                meta = await _call_with_retry(
+                    get_video_metadata,
+                    vid,
+                    description=f"fetch metadata for {vid}",
+                )
                 if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
                     await msg.add_reaction("⏱️")
                     await msg.reply(
                         "Videos longer than 10 minutes are not allowed on the playlist."
                     )
                     continue
-                add_to_playlist(vid, PLAYLIST)
+                await _call_with_retry(
+                    add_to_playlist,
+                    vid,
+                    PLAYLIST,
+                    description=f"add video {vid}",
+                )
                 await msg.add_reaction("✅")
                 await _announce_added(
                     meta=meta,
@@ -378,14 +452,23 @@ if tree is not None:
             # Take the first parsed video ID
             vid = vids[0]
 
-            if video_exists(vid, PLAYLIST):
+            if await _call_with_retry(
+                video_exists,
+                vid,
+                PLAYLIST,
+                description=f"check playlist for {vid}",
+            ):
                 await _safe_followup_send(
                     interaction,
                     f"Video `{vid}` is already in the playlist. 🔁", ephemeral=True
                 )
                 return
 
-            meta = get_video_metadata(vid)
+            meta = await _call_with_retry(
+                get_video_metadata,
+                vid,
+                description=f"fetch metadata for {vid}",
+            )
             if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
                 await _safe_followup_send(
                     interaction,
@@ -394,7 +477,12 @@ if tree is not None:
                 )
                 return
 
-            add_to_playlist(vid, PLAYLIST)
+            await _call_with_retry(
+                add_to_playlist,
+                vid,
+                PLAYLIST,
+                description=f"add video {vid}",
+            )
 
             # Public announcement in the channel for everyone, with requester mention
             user = getattr(interaction, "user", None)
