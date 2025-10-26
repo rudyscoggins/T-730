@@ -191,6 +191,18 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = _int_from_env("CHANNEL_ID")
 GUILD_ID = _int_from_env("GUILD_ID")
 PLAYLIST = os.getenv("PLAYLIST_ID")
+
+
+def _resolve_playlist_url() -> str | None:
+    """Return a shareable playlist URL if available."""
+
+    explicit = os.getenv("PLAYLIST_URL")
+    if explicit:
+        return explicit
+    if PLAYLIST:
+        return f"https://youtube.com/playlist?list={PLAYLIST}"
+    return None
+
 KEYWORD = "730radio"
 ENABLE_MESSAGE_SCANNING = _bool_from_env("ENABLE_MESSAGE_SCANNING", default=True)
 
@@ -245,6 +257,19 @@ def _format_added_line(meta: dict) -> str:
     return f"Added: {title} — {channel} ({duration})"
 
 
+def _build_announcement_content(content_prefix: str | None, line: str) -> str:
+    """Compose the public success message content."""
+
+    parts: list[str] = []
+    if content_prefix:
+        parts.append(content_prefix)
+    parts.append(line)
+    playlist_url = _resolve_playlist_url()
+    if playlist_url:
+        parts.append(f"Listen to the playlist: {playlist_url}")
+    return "\n".join(parts)
+
+
 async def _announce_added(
     *,
     meta: dict,
@@ -259,12 +284,12 @@ async def _announce_added(
     """
     embed = _build_video_embed(meta)
     line = _format_added_line(meta)
-    content = (f"{content_prefix} — {line}") if content_prefix else line
+    content = _build_announcement_content(content_prefix, line)
 
     try:
         if channel is not None:
             if embed is not None:
-                await channel.send(content=content_prefix or None, embed=embed)
+                await channel.send(content=content, embed=embed)
             else:
                 await channel.send(content)
             return
@@ -274,7 +299,7 @@ async def _announce_added(
     # Fallback path if channel was None or send failed
     try:
         if embed is not None:
-            await fallback_sender(content=content_prefix or None, embed=embed)
+            await fallback_sender(content=content, embed=embed)
         else:
             await fallback_sender(content)
     except Exception as exc:
