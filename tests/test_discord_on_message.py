@@ -73,6 +73,11 @@ async def test_on_message_adds_two_videos(monkeypatch):
     assert added == [("AAAAAAA1111", "pl123"), ("BBBBBBB2222", "pl123")]
     # Two success reactions
     assert msg.reactions.count("✅") == 2
+    # Public messages should include the playlist link for visibility
+    playlist_link = "https://youtube.com/playlist?list=pl123"
+    contents = [entry["content"] for entry in msg.channel.sent_messages]
+    assert len(contents) == 2
+    assert all(playlist_link in content for content in contents)
 
 
 @pytest.mark.asyncio
