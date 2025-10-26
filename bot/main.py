@@ -516,7 +516,7 @@ if tree is not None:
                 or getattr(user, "name", None)
                 or "someone"
             )
-            content_prefix = f"Added by {user_mention}"
+            content_prefix = f"Song added by {user_mention}"
             channel = await _resolve_channel_for_interaction(interaction)
             await _announce_added(
                 meta=meta,
