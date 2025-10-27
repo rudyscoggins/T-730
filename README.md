@@ -62,4 +62,11 @@ Set via `.env`:
 2. On RPIZelda:
    - `cd ~/docker/T-730/T-730-Prod`
    - `git pull origin main`
-   - `docker compose up -d --build`
+   - Stop the existing stack to ensure the old container is gone:
+     - `docker compose down`
+   - Rebuild and recreate the production bot with a fresh image:
+     - `docker compose build --no-cache radiobot`
+     - `docker compose up -d --force-recreate radiobot`
+   - Confirm the new build is running (optional):
+     - `docker compose ps`
+     - `docker compose logs -f radiobot`
