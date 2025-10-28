@@ -474,42 +474,6 @@ if tree is not None:
                 )
                 return
 
-            # Take the first parsed video ID
-            vid = vids[0]
-
-            if await _call_with_retry(
-                video_exists,
-                vid,
-                PLAYLIST,
-                description=f"check playlist for {vid}",
-            ):
-                await _safe_followup_send(
-                    interaction,
-                    f"Video `{vid}` is already in the playlist. 🔁", ephemeral=True
-                )
-                return
-
-            meta = await _call_with_retry(
-                get_video_metadata,
-                vid,
-                description=f"fetch metadata for {vid}",
-            )
-            if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
-                await _safe_followup_send(
-                    interaction,
-                    "Videos longer than 10 minutes are not allowed on the playlist.",
-                    ephemeral=True,
-                )
-                return
-
-            await _call_with_retry(
-                add_to_playlist,
-                vid,
-                PLAYLIST,
-                description=f"add video {vid}",
-            )
-
-            # Public announcement in the channel for everyone, with requester mention
             user = getattr(interaction, "user", None)
             user_mention = (
                 getattr(user, "mention", None)
@@ -518,17 +482,81 @@ if tree is not None:
             )
             content_prefix = f"Song added by {user_mention}"
             channel = await _resolve_channel_for_interaction(interaction)
-            await _announce_added(
-                meta=meta,
-                content_prefix=content_prefix,
-                channel=channel,
-                fallback_sender=interaction.followup.send,
-            )
 
-            # Always clear the deferred "thinking" state with an ephemeral ack
+            added: list[tuple[str, str]] = []
+            duplicates: list[str] = []
+            too_long: list[tuple[str, str]] = []
+            failures: list[tuple[str, str]] = []
+
+            for vid in vids:
+                try:
+                    if await _call_with_retry(
+                        video_exists,
+                        vid,
+                        PLAYLIST,
+                        description=f"check playlist for {vid}",
+                    ):
+                        duplicates.append(vid)
+                        continue
+
+                    meta = await _call_with_retry(
+                        get_video_metadata,
+                        vid,
+                        description=f"fetch metadata for {vid}",
+                    )
+                    title = meta.get("title") or vid
+
+                    if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
+                        too_long.append((vid, title))
+                        continue
+
+                    await _call_with_retry(
+                        add_to_playlist,
+                        vid,
+                        PLAYLIST,
+                        description=f"add video {vid}",
+                    )
+
+                    await _announce_added(
+                        meta=meta,
+                        content_prefix=content_prefix,
+                        channel=channel,
+                        fallback_sender=interaction.followup.send,
+                    )
+
+                    added.append((vid, title))
+                except CredentialsExpiredError as e:
+                    await _safe_followup_send(interaction, str(e), ephemeral=True)
+                    return
+                except Exception as exc:
+                    logging.exception("Couldn't add video via slash command: %s", vid)
+                    failures.append((vid, str(exc)))
+
+            summary_parts: list[str] = []
+            if added:
+                added_lines = "\n".join(
+                    f"• {title} (`{vid}`)" for vid, title in added
+                )
+                summary_parts.append("Added to the playlist:\n" + added_lines)
+            if duplicates:
+                duplicate_lines = "\n".join(f"• `{vid}`" for vid in duplicates)
+                summary_parts.append("Already in the playlist:\n" + duplicate_lines)
+            if too_long:
+                too_long_lines = "\n".join(
+                    f"• {title} (`{vid}`)" for vid, title in too_long
+                )
+                summary_parts.append("Too long (>10 minutes):\n" + too_long_lines)
+            if failures:
+                failure_lines = "\n".join(
+                    f"• `{vid}` — {error}" for vid, error in failures
+                )
+                summary_parts.append("Failed to add:\n" + failure_lines)
+            if not summary_parts:
+                summary_parts.append("No videos were processed.")
+
             await _safe_followup_send(
                 interaction,
-                "Video added to the playlist. ✅",
+                "\n\n".join(summary_parts),
                 ephemeral=True,
             )
         except CredentialsExpiredError as e:

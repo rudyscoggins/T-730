@@ -23,3 +23,18 @@ def test_extracts_from_multiple_variants_and_deduplicates():
         "FFFFFFF6666",
     ]
 
+
+def test_extracts_from_comma_delimited_list():
+    text = (
+        "https://youtu.be/GAAAAAA1111,"
+        "https://youtu.be/HBBBBBB2222, "
+        "www.youtube.com/watch?v=ICCCCCC3333"
+    )
+
+    ids = canonical_video_ids_from_text(text)
+    assert ids == [
+        "GAAAAAA1111",
+        "HBBBBBB2222",
+        "ICCCCCC3333",
+    ]
+

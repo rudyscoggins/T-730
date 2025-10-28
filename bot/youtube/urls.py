@@ -57,11 +57,18 @@ def canonical_video_ids_from_text(text: str) -> List[str]:
     scheme-less inputs like ``youtube.com/watch?v=...`` as well.
     """
 
+    # Treat commas as delimiters between potential URLs to support comma-separated lists.
+    normalized_text = re.sub(r",[\s]*", " ", text)
+
     # Find explicit http(s) URLs first
-    candidates = list(re.findall(r"https?://[^\s<>]+", text))
+    candidates = list(re.findall(r"https?://[^\s<>]+", normalized_text))
 
     # Also accept bare youtube links without scheme (e.g., youtube.com/... or youtu.be/...)
-    bare_matches = re.findall(r"(?:(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s<>]+)", text, flags=re.IGNORECASE)
+    bare_matches = re.findall(
+        r"(?:(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s<>]+)",
+        normalized_text,
+        flags=re.IGNORECASE,
+    )
     candidates.extend(bare_matches)
 
     seen = set()
