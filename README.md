@@ -1,6 +1,6 @@
 # T-730
 
-Self-hosted Discord bot that watches for messages containing the keyword "730Radio" and a YouTube link, then adds the video to a shared YouTube playlist via the YouTube Data API v3. Designed to run on a Raspberry Pi in Docker.
+Self-hosted Discord bot that exposes a `/addradio` slash command for adding YouTube links to a shared playlist via the YouTube Data API v3. Designed to run on a Raspberry Pi in Docker.
 
 ## Quick Start (Raspberry Pi)
 1. Choose stack directory on RPIZelda (`192.168.86.41`):
@@ -39,9 +39,9 @@ Self-hosted Discord bot that watches for messages containing the keyword "730Rad
   - Docker: `docker compose run --rm -e OAUTH_FORCE=1 radiobot`
 
 ## Bot Behavior
-- Detects keyword "730Radio" (case-insensitive) and YouTube links (`youtu.be/...` or `youtube.com/watch?v=`).
+- Provides a `/addradio` slash command that accepts a YouTube URL (`youtu.be/...` or `youtube.com/watch?v=`).
 - Extracts the video ID, appends to the playlist, and skips duplicates.
-- Reacts with ✅ on success or ❌ on failure.
+- Shares success summaries privately with the caller and posts a public announcement embed in the configured channel.
 - Exposes `GET /healthz` on `HEALTH_PORT` for liveness/readiness.
 
 ## Troubleshooting

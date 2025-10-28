@@ -203,13 +203,8 @@ def _resolve_playlist_url() -> str | None:
         return f"https://youtube.com/playlist?list={PLAYLIST}"
     return None
 
-KEYWORD = "730radio"
-ENABLE_MESSAGE_SCANNING = _bool_from_env("ENABLE_MESSAGE_SCANNING", default=True)
-
 logging.basicConfig(level=logging.INFO)
 intents = discord.Intents.default()
-if ENABLE_MESSAGE_SCANNING:
-    intents.message_content = True
 bot = discord.Client(intents=intents)
  
 # Slash commands (discord.app_commands) if available
@@ -391,63 +386,6 @@ async def on_ready():
             logging.exception("Failed to sync slash commands")
 
     # Ready announcement intentionally removed to avoid extra noise in the channel
-
-# Optional legacy keyword scanning (can be disabled via ENABLE_MESSAGE_SCANNING=0)
-if ENABLE_MESSAGE_SCANNING:
-    @bot.event
-    async def on_message(msg: discord.Message):
-        if msg.author.bot or msg.channel.id != CHANNEL_ID:
-            return
-        if KEYWORD not in msg.content.lower():
-            return
-
-        vids = canonical_video_ids_from_text(msg.content)
-        if not vids:
-            return
-
-        for vid in vids:
-            try:
-                if await _call_with_retry(
-                    video_exists,
-                    vid,
-                    PLAYLIST,
-                    description=f"check playlist for {vid}",
-                ):
-                    await msg.add_reaction("🔁")
-                    continue
-                meta = await _call_with_retry(
-                    get_video_metadata,
-                    vid,
-                    description=f"fetch metadata for {vid}",
-                )
-                if int(meta.get("duration_seconds", 0)) > MAX_VIDEO_DURATION_SECONDS:
-                    await msg.add_reaction("⏱️")
-                    await msg.reply(
-                        "Videos longer than 10 minutes are not allowed on the playlist."
-                    )
-                    continue
-                await _call_with_retry(
-                    add_to_playlist,
-                    vid,
-                    PLAYLIST,
-                    description=f"add video {vid}",
-                )
-                await msg.add_reaction("✅")
-                await _announce_added(
-                    meta=meta,
-                    content_prefix=None,
-                    channel=msg.channel,
-                    fallback_sender=msg.channel.send,
-                )
-            except CredentialsExpiredError as e:
-                await msg.add_reaction("❌")
-                await msg.reply(str(e))
-                return
-            except Exception as e:
-                logging.exception("Couldn't add video %s to playlist %s", vid, PLAYLIST)
-                await msg.add_reaction("❌")
-                await msg.reply(f"Couldn't add `{vid}`: {e}")
-
 
 # Slash command: /addradio (available when app_commands is present)
 if tree is not None:
