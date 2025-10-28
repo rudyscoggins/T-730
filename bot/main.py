@@ -14,7 +14,7 @@ from .youtube import (
     video_exists,
     get_video_metadata,
 )
-from .youtube import CredentialsExpiredError
+from .youtube import CredentialsExpiredError, MissingGoogleDependenciesError
 try:
     # discord.py depends on aiohttp; use it for an in-process health endpoint
     from aiohttp import web  # type: ignore
@@ -32,7 +32,10 @@ _RETRY_WAIT_SECONDS: tuple[int, ...] = (
     + (_FAST_RETRY_DELAY_SECONDS,) * _FAST_RETRY_ATTEMPTS
     + _SLOW_RETRY_DELAYS
 )
-_NON_RETRYABLE_EXCEPTIONS = (CredentialsExpiredError,)
+_NON_RETRYABLE_EXCEPTIONS = (
+    CredentialsExpiredError,
+    MissingGoogleDependenciesError,
+)
 
 
 async def _call_with_retry(
@@ -522,6 +525,9 @@ if tree is not None:
                     )
 
                     added.append((vid, title))
+                except MissingGoogleDependenciesError as e:
+                    await _safe_followup_send(interaction, str(e), ephemeral=True)
+                    return
                 except CredentialsExpiredError as e:
                     await _safe_followup_send(interaction, str(e), ephemeral=True)
                     return
@@ -556,6 +562,8 @@ if tree is not None:
                 "\n\n".join(summary_parts),
                 ephemeral=True,
             )
+        except MissingGoogleDependenciesError as e:
+            await _safe_followup_send(interaction, str(e), ephemeral=True)
         except CredentialsExpiredError as e:
             await _safe_followup_send(interaction, str(e), ephemeral=True)
         except Exception as e:
