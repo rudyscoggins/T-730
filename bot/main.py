@@ -1,4 +1,4 @@
-import os, logging, asyncio, time
+import os, logging, asyncio, time, math
 from typing import Callable, TypeVar, Any
 
 try:  # pragma: no cover - exercised indirectly via tests when discord missing
@@ -214,6 +214,22 @@ tree = app_commands.CommandTree(bot) if app_commands else None
 START_TIME = time.time()
 _health_started = False
 MAX_VIDEO_DURATION_SECONDS = 10 * 60
+_DEFAULT_ADDRADIO_COOLDOWN_SECONDS = 30
+
+_configured_cooldown = _int_from_env("ADDRADIO_COOLDOWN_SECONDS")
+if _configured_cooldown is None:
+    ADDRADIO_COOLDOWN_SECONDS = _DEFAULT_ADDRADIO_COOLDOWN_SECONDS
+elif _configured_cooldown < 0:
+    logging.warning(
+        "ADDRADIO_COOLDOWN_SECONDS=%s is negative; disabling cooldown",
+        _configured_cooldown,
+    )
+    ADDRADIO_COOLDOWN_SECONDS = 0
+else:
+    ADDRADIO_COOLDOWN_SECONDS = _configured_cooldown
+
+_user_cooldowns: dict[int, float] = {}
+_user_cooldown_lock = asyncio.Lock()
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -321,6 +337,32 @@ async def _resolve_channel_for_interaction(interaction):
     return None
 
 
+async def _get_cooldown_remaining(user_id: int, *, now: float | None = None) -> float:
+    """Return the remaining cooldown in seconds for ``user_id``."""
+
+    if ADDRADIO_COOLDOWN_SECONDS <= 0:
+        return 0.0
+
+    current = time.time() if now is None else now
+    async with _user_cooldown_lock:
+        last = _user_cooldowns.get(user_id)
+        if last is None:
+            return 0.0
+        remaining = ADDRADIO_COOLDOWN_SECONDS - (current - last)
+    return remaining if remaining > 0 else 0.0
+
+
+async def _mark_cooldown(user_id: int, *, now: float | None = None) -> None:
+    """Record the current timestamp for ``user_id``'s cooldown."""
+
+    if ADDRADIO_COOLDOWN_SECONDS <= 0:
+        return
+
+    current = time.time() if now is None else now
+    async with _user_cooldown_lock:
+        _user_cooldowns[user_id] = current
+
+
 async def _start_health_server() -> None:
     """Start a lightweight health HTTP server on HEALTH_PORT.
 
@@ -400,6 +442,21 @@ if tree is not None:
                 )
                 return
 
+            user = getattr(interaction, "user", None)
+            user_id = getattr(user, "id", None)
+            if user_id is not None:
+                remaining = await _get_cooldown_remaining(user_id)
+                if remaining > 0:
+                    wait_seconds = max(1, math.ceil(remaining))
+                    await interaction.response.send_message(
+                        "Please wait "
+                        f"{wait_seconds} more seconds before adding more songs. "
+                        "Tip: you can add multiple tracks at once by including a "
+                        "comma-separated list of YouTube links.",
+                        ephemeral=True,
+                    )
+                    return
+
             # Defer early to allow slower YouTube API calls, but do it silently
             # (no visible "thinking…" message) to avoid double confirmations.
             await interaction.response.defer(ephemeral=True)
@@ -412,7 +469,9 @@ if tree is not None:
                 )
                 return
 
-            user = getattr(interaction, "user", None)
+            if user_id is not None:
+                await _mark_cooldown(user_id)
+
             user_mention = (
                 getattr(user, "mention", None)
                 or getattr(user, "name", None)
