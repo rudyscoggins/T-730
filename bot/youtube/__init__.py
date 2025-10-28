@@ -35,6 +35,17 @@ class CredentialsExpiredError(RuntimeError):
     pass
 
 
+class MissingGoogleDependenciesError(RuntimeError):
+    """Raised when optional google-api-python-client dependencies are unavailable."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "google-api-python-client dependencies are unavailable. Install"
+            " bot/requirements.txt or set up the runtime image before running"
+            " YouTube helpers.",
+        )
+
+
 def _ensure_google_dependencies() -> None:
     """Import google-api-python-client pieces lazily with friendly errors."""
 
@@ -44,11 +55,7 @@ def _ensure_google_dependencies() -> None:
         return
 
     if _GOOGLE_IMPORT_ERROR is not None:
-        raise RuntimeError(
-            "google-api-python-client dependencies are unavailable. Install"
-            " bot/requirements.txt or set up the runtime image before running"
-            " YouTube helpers.",
-        ) from _GOOGLE_IMPORT_ERROR
+        raise MissingGoogleDependenciesError() from _GOOGLE_IMPORT_ERROR
 
     try:
         from google.auth.transport.requests import Request as _Request  # type: ignore
@@ -58,11 +65,7 @@ def _ensure_google_dependencies() -> None:
         from google.auth.exceptions import RefreshError as _RefreshError  # type: ignore
     except Exception as exc:  # pragma: no cover - triggered when deps missing
         _GOOGLE_IMPORT_ERROR = exc
-        raise RuntimeError(
-            "google-api-python-client dependencies are unavailable. Install"
-            " bot/requirements.txt or set up the runtime image before running"
-            " YouTube helpers.",
-        ) from exc
+        raise MissingGoogleDependenciesError() from exc
 
     Request = _Request
     Credentials = _Credentials
@@ -266,6 +269,7 @@ __all__ = [
     "get_video_duration_seconds",
     "get_video_metadata",
     "CredentialsExpiredError",
+    "MissingGoogleDependenciesError",
 ]
 
 
