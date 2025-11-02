@@ -1,9 +1,11 @@
 import pytest
 
 
+from bot import retry
+
+
 @pytest.mark.asyncio
 async def test_retry_helper_retries_then_succeeds(monkeypatch):
-    from bot import main as m
 
     attempts = 0
 
@@ -19,9 +21,9 @@ async def test_retry_helper_retries_then_succeeds(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    monkeypatch.setattr(m.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(retry.asyncio, "sleep", fake_sleep)
 
-    result = await m._call_with_retry(flaky_call, description="flaky call")
+    result = await retry.call_with_retry(flaky_call, description="flaky call")
 
     assert result == "ok"
     assert attempts == 4
@@ -30,7 +32,6 @@ async def test_retry_helper_retries_then_succeeds(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_retry_helper_eventually_stops(monkeypatch):
-    from bot import main as m
 
     attempts = 0
 
@@ -44,10 +45,10 @@ async def test_retry_helper_eventually_stops(monkeypatch):
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    monkeypatch.setattr(m.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(retry.asyncio, "sleep", fake_sleep)
 
     with pytest.raises(RuntimeError):
-        await m._call_with_retry(always_fail, description="always fail")
+        await retry.call_with_retry(always_fail, description="always fail")
 
-    assert attempts == len(m._RETRY_WAIT_SECONDS)
+    assert attempts == len(retry.RETRY_WAIT_SECONDS)
     assert sleeps[-3:] == [60, 300, 600]
