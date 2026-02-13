@@ -1,6 +1,6 @@
-import logging
-import math
-import time
+import os, logging, asyncio, time, math
+from datetime import datetime
+from typing import Callable, TypeVar, Any
 
 try:  # pragma: no cover - exercised indirectly via tests when discord missing
     import discord  # type: ignore
@@ -20,6 +20,7 @@ try:
 except Exception:  # pragma: no cover - only if aiohttp missing at runtime
     web = None  # type: ignore
 from .youtube.urls import canonical_video_ids_from_text
+from .memories import save_memory, get_memories
 
 # Best-effort detection of Discord HTTP errors without tightly coupling to discord.py
 def _is_unknown_interaction_error(exc: Exception) -> bool:
@@ -444,6 +445,80 @@ if tree is not None:
                 await _safe_followup_send(interaction, f"Couldn't add video: {e}", ephemeral=True)
             except Exception:
                 logging.debug("Failed to notify user about error", exc_info=True)
+
+    @tree.command(name="remember", description="Save a funny quote or memory")
+    @app_commands.describe(text="The quote or memory to save")
+    async def remember(interaction, text: str):
+        try:
+            user = getattr(interaction, "user", None)
+            author = str(user) if user else "Unknown"
+            
+            await asyncio.to_thread(save_memory, author, text)
+            
+            await interaction.response.send_message(
+                f"Memory saved! 📝\n> {text}", ephemeral=False
+            )
+        except Exception as e:
+            logging.exception("Failed to save memory")
+            await interaction.response.send_message(
+                f"Failed to save memory: {e}", ephemeral=True
+            )
+
+    async def _recall_memories(interaction, limit: int):
+        try:
+            memories = await asyncio.to_thread(get_memories, limit)
+            
+            if not memories:
+                await interaction.response.send_message(
+                    "No memories found yet. Use `/remember` to add some!", ephemeral=True
+                )
+                return
+
+            Embed = getattr(discord, "Embed", None)
+            if Embed is None:
+                # Fallback to plain text
+                lines = []
+                for m in memories:
+                    lines.append(f"• \"{m['content']}\" — {m['author']}")
+                await interaction.response.send_message(
+                    "**Recent Memories:**\n" + "\n".join(lines), ephemeral=False
+                )
+                return
+
+            embed = Embed(title=f"Recent Memories (Last {len(memories)})", color=0x3498db)
+            for m in memories:
+                # Truncate content if too long for field value (1024 chars)
+                content = m['content']
+                if len(content) > 1000:
+                    content = content[:997] + "..."
+                
+                # Format timestamp if possible
+                try:
+                    dt = datetime.fromisoformat(m['timestamp'])
+                    ts = dt.strftime("%Y-%m-%d")
+                except:
+                    ts = "unknown date"
+                
+                embed.add_field(
+                    name=f"{m['author']} ({ts})",
+                    value=content,
+                    inline=False
+                )
+            
+            await interaction.response.send_message(embed=embed, ephemeral=False)
+        except Exception as e:
+            logging.exception("Failed to recall memories")
+            await interaction.response.send_message(
+                f"Failed to recall memories: {e}", ephemeral=True
+            )
+
+    @tree.command(name="recall", description="List the last 5 memories")
+    async def recall(interaction):
+        await _recall_memories(interaction, 5)
+
+    @tree.command(name="recallall", description="List the last 20 memories")
+    async def recallall(interaction):
+        await _recall_memories(interaction, 20)
 
 if __name__ == "__main__":
     bot.run(TOKEN)
